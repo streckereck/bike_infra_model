@@ -16,10 +16,16 @@ reference_study_area <- reference_study_area %>%
 
 reference_study_area <- reference_study_area %>%
   mutate(
+    replica_speed_missing = is.na(average_speed_mph),
+    replica_volume_missing = is.na(aadt),
     replica_missing = case_when(
-      is.na(aadt) & is.na(average_speed_mph) ~ "Speed and volume missing",
-      is.na(aadt) ~ "Volume missing",
-      is.na(average_speed_mph) ~ "Speed missing",
+      replica_speed_missing & replica_volume_missing ~ "Speed and volume missing",
+      replica_volume_missing ~ "Volume missing",
+      replica_speed_missing ~ "Speed missing",
       T ~ "Speed and volume available"
     )
   )
+
+table(reference_study_area$replica_speed_missing)
+table(reference_study_area$replica_volume_missing)
+table(reference_study_area$replica_missing)
