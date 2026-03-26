@@ -1,0 +1,16 @@
+.Rhistory
+.RData
+.Rproj.user/
+
+data_raw/
+data_intermediate/
+data_processed/
+outputs/
+
+*.gpkg
+*.rds
+*.csv
+*.shp
+*.prj
+*.shx
+*.dbf
