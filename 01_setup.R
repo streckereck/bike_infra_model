@@ -1,7 +1,12 @@
 library(sf)
+library(tigris)
 library(tidyverse)
+library(here)
 library(xgboost)
 library(mapview)
+
+options(tigris_use_cache = TRUE)
+options(tigris_cache_dir = here::here("data_raw", "tigris_cache"))
 
 utm_11 <- 32611
 study_area_name <- "Santa Barbara County"
