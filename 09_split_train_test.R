@@ -11,7 +11,7 @@ message("Running: 09_split_train_test.R")
 # -----------------------------
 # Settings
 # -----------------------------
-set.seed(42)
+set.seed(404)
 test_prop <- 0.20
 
 # -----------------------------

@@ -32,7 +32,7 @@ crs_wgs84 <- 4326
 
 # Current study area name
 # Change this when switching between prototype areas / full runs
-study_area_name <- "city_santa_barbara"
+study_area_name <- "city_santa_barbara_north"
 
 # -----------------------------
 # tigris options
