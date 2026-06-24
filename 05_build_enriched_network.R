@@ -89,7 +89,7 @@ network_enriched <- make_replica_composite_features(
 )
 
 # -----------------------------
-# Optional: keep a clean subset of model-relevant columns
+# keep a clean subset of model-relevant columns
 # (still retaining geometry)
 # -----------------------------
 network_enriched <- network_enriched %>%
@@ -106,6 +106,7 @@ network_enriched <- network_enriched %>%
     is_unpaved = as.logical(is_unpaved),
     is_bridge = as.logical(is_bridge),
     is_oneway = as.logical(is_oneway),
+    is_crossing = as.logical(is_crossing),
     bike_route_designated = as.logical(bike_route_designated),
     replica_volume_missing = as.logical(replica_volume_missing),
     replica_speed_missing = as.logical(replica_speed_missing),

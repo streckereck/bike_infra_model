@@ -15,7 +15,7 @@ message("Running: 03_prepare_reference_data.R")
 # Read inputs
 # -----------------------------
 reference_raw <- sf::st_read(
-  here::here("data_raw", "ref_data_spatial.gpkg"),
+  here::here("data_raw", "ref_data_spatial_04May2026.gpkg"),
   quiet = TRUE
 )
 
@@ -56,8 +56,27 @@ reference <- reference_raw %>%
     class = dplyr::case_when(
       class %in% c("Bike-only trails", "Multi-use trails") ~ "Paths",
       class %in% c("Connecting gravel path") ~ "Trails (gravel)",
+      bk_lane == "Yes" &
+        bk_buff == "Physical barrier" ~ "Bike lane (physical protection)",
+      class == "Bike lane (buffer)" ~ "Bike lane (painted buffer)",
       TRUE ~ class
     ))
+
+# quick point fix 
+reference[which(reference$SegmentID %in% c(575, 682)), ]$class <- "Bike lane (painted buffer)"
+reference[which(reference$SegmentID %in% c(641, 743, 1285,
+                                           1365)), ]$class <- "Bike lane (physical protection)"
+
+reference[which(reference$SegmentID %in% c(74, 201, 271, 1159, 1175, 1268, 1392, 1511, 1530, 1220)), ]$class <- "Bike lane (no buffer)"
+
+reference[which(reference$SegmentID %in% c(168, 1465, 1216)), ]$class <- "Paths"
+reference[which(reference$SegmentID %in% c(1258)), ]$class <- "Trails (gravel)"
+
+reference[which(reference$SegmentID %in% c(1287, 1492, 1440, 1037, 1097, 1291, 1583, 1601, 1466, 1100, 1625)), ]$class <- "Paved shoulder"
+reference[which(reference$SegmentID %in% c(85, 289, 1244, 1400)), ]$class <- "Road, no infrastructure"
+
+
+
 
 # -----------------------------
 # Filter to usable modelling classes
@@ -66,6 +85,7 @@ reference_model <- reference %>%
   dplyr::filter(
     !is.na(class),
     !class %in% c(
+      NA,
       "UNKNOWN",
       "No streetview",
       "Not enough evidence to evaluate"

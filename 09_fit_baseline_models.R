@@ -1,7 +1,7 @@
 # Purpose:
 # Fit a baseline Random Forest model using the blocked train/test split.
 # - read split model table
-# - select predictors
+# - select predictors from model_predictors
 # - do simple train-based imputation
 # - fit multiclass random forest
 # - evaluate on held-out test set
@@ -9,7 +9,7 @@
 
 source("01_setup.R")
 
-message("Running: 10_fit_baseline_models.R")
+message("Running: 09_fit_baseline_models.R")
 
 library(ranger)
 library(yardstick)
@@ -21,19 +21,17 @@ model_table <- readRDS(
   here::here("data_intermediate", paste0("model_table_split_", study_area_name, ".rds"))
 )
 
-# -----------------------------
-# Drop geometry for modelling
-# -----------------------------
 model_df <- sf::st_drop_geometry(model_table)
 
 # -----------------------------
-# Check required columns
+# Basic checks
 # -----------------------------
-required_cols <- c("SegmentID", "block_id", "class", "split")
+required_cols <- c("class", "split", model_predictors)
 missing_cols <- setdiff(required_cols, names(model_df))
 
 if (length(missing_cols) > 0) {
-  stop("Missing required columns: ", paste(missing_cols, collapse = ", "))
+  stop("Missing required columns in model_table_split: ",
+       paste(missing_cols, collapse = ", "))
 }
 
 # -----------------------------
@@ -42,110 +40,95 @@ if (length(missing_cols) > 0) {
 train_df <- model_df %>% dplyr::filter(split == "train")
 test_df  <- model_df %>% dplyr::filter(split == "test")
 
-# -----------------------------
-# Choose predictors
-# -----------------------------
-# Keep this conservative for a baseline.
-# Exclude IDs, outcome, split, and fields that are mostly QA / lineage.
-exclude_cols <- c(
-  "SegmentID",
-  "source_wave",
-  "stratum",
-  "block_id",
-  "reviewer",
-  "class",
-  "split"
-)
-
-predictor_cols <- setdiff(names(model_df), exclude_cols)
-
-# Optional: inspect predictor list
-message("Number of candidate predictors: ", length(predictor_cols))
+all_class_levels <- levels(factor(model_df$class))
 
 # -----------------------------
-# Coerce common field types
+# Keep only outcome + predictors
+# -----------------------------
+train_model <- train_df %>%
+  dplyr::select(class, dplyr::all_of(model_predictors))
+
+test_model <- test_df %>%
+  dplyr::select(class, dplyr::all_of(model_predictors))
+
+# -----------------------------
+# Light type cleaning
 # -----------------------------
 coerce_types <- function(df) {
   df %>%
     dplyr::mutate(
-      class = factor(class),
+      class = factor(class, levels = all_class_levels),
       
-      road_class = if ("road_class" %in% names(.)) factor(road_class) else NULL,
-      highway = if ("highway" %in% names(.)) factor(highway) else NULL,
-      surface_class = if ("surface_class" %in% names(.)) factor(surface_class) else NULL,
-      replica_missing = if ("replica_missing" %in% names(.)) factor(replica_missing) else NULL,
-      replica_traffic_context = if ("replica_traffic_context" %in% names(.)) factor(replica_traffic_context) else NULL,
+      across(any_of(c("road_class", "highway", "surface_class",
+                      "replica_missing", "replica_traffic_context")),
+             ~ factor(.)),
       
-      has_any_cycleway = if ("has_any_cycleway" %in% names(.)) as.factor(has_any_cycleway) else NULL,
-      has_lane = if ("has_lane" %in% names(.)) as.factor(has_lane) else NULL,
-      has_track = if ("has_track" %in% names(.)) as.factor(has_track) else NULL,
-      is_unpaved = if ("is_unpaved" %in% names(.)) as.factor(is_unpaved) else NULL,
-      is_bridge = if ("is_bridge" %in% names(.)) as.factor(is_bridge) else NULL,
-      is_oneway = if ("is_oneway" %in% names(.)) as.factor(is_oneway) else NULL,
-      bike_route_designated = if ("bike_route_designated" %in% names(.)) as.factor(bike_route_designated) else NULL,
-      replica_volume_missing = if ("replica_volume_missing" %in% names(.)) as.factor(replica_volume_missing) else NULL,
-      replica_speed_missing = if ("replica_speed_missing" %in% names(.)) as.factor(replica_speed_missing) else NULL,
-      replica_low_stress = if ("replica_low_stress" %in% names(.)) as.factor(replica_low_stress) else NULL
+      across(any_of(c("has_any_cycleway", "has_lane", "has_track",
+                      "is_unpaved", "is_bridge", "is_oneway",
+                      "bike_route_designated", "replica_volume_missing",
+                      "replica_speed_missing", "replica_low_stress")),
+             ~ factor(.)),
+      
+      across(any_of(c("lanes", "maxspeed",
+                      "replica_vol_aadt", "replica_spd_average_speed_mph",
+                      "replica_log_aadt")),
+             ~ suppressWarnings(as.numeric(.)))
     )
 }
 
-train_df <- coerce_types(train_df)
-test_df  <- coerce_types(test_df)
+train_model <- coerce_types(train_model)
+test_model  <- coerce_types(test_model)
 
 # -----------------------------
 # Train-based simple imputation
 # -----------------------------
 get_mode <- function(x) {
-  x <- x[!is.na(x)]
+  x <- x[!is.na(x) & x != ""]
   if (length(x) == 0) return(NA)
   ux <- unique(x)
   ux[which.max(tabulate(match(x, ux)))]
 }
 
-# Build imputation values from training data only
-train_x <- train_df[, predictor_cols, drop = FALSE]
-test_x  <- test_df[, predictor_cols, drop = FALSE]
+train_x <- train_model[, model_predictors, drop = FALSE]
+test_x  <- test_model[, model_predictors, drop = FALSE]
 
 numeric_cols <- names(train_x)[vapply(train_x, is.numeric, logical(1))]
-factor_cols  <- names(train_x)[vapply(train_x, function(x) is.factor(x) || is.character(x), logical(1))]
-other_cols   <- setdiff(names(train_x), c(numeric_cols, factor_cols))
+factor_cols  <- names(train_x)[vapply(train_x, is.factor, logical(1))]
 
-# Numeric medians
+# numeric medians from training only
 num_impute <- lapply(train_x[, numeric_cols, drop = FALSE], function(x) {
   stats::median(x, na.rm = TRUE)
 })
 
-# Factor/character modes
+# factor modes from training only
 fac_impute <- lapply(train_x[, factor_cols, drop = FALSE], get_mode)
 
-# Apply imputation
+# apply numeric imputation
 for (nm in numeric_cols) {
   train_x[[nm]][is.na(train_x[[nm]])] <- num_impute[[nm]]
   test_x[[nm]][is.na(test_x[[nm]])]   <- num_impute[[nm]]
 }
 
+# apply factor imputation and align levels
 for (nm in factor_cols) {
-  # Convert characters to factors using combined levels from train + test after filling
+  train_x[[nm]] <- as.character(train_x[[nm]])
+  test_x[[nm]]  <- as.character(test_x[[nm]])
+  
   train_x[[nm]][is.na(train_x[[nm]]) | train_x[[nm]] == ""] <- fac_impute[[nm]]
   test_x[[nm]][is.na(test_x[[nm]]) | test_x[[nm]] == ""]   <- fac_impute[[nm]]
   
-  all_levels <- unique(c(as.character(train_x[[nm]]), as.character(test_x[[nm]])))
-  train_x[[nm]] <- factor(as.character(train_x[[nm]]), levels = all_levels)
-  test_x[[nm]]  <- factor(as.character(test_x[[nm]]), levels = all_levels)
+  all_levels <- unique(c(train_x[[nm]], test_x[[nm]]))
+  train_x[[nm]] <- factor(train_x[[nm]], levels = all_levels)
+  test_x[[nm]]  <- factor(test_x[[nm]], levels = all_levels)
 }
 
-# Keep any other columns as-is
-if (length(other_cols) > 0) {
-  message("Other predictor columns retained as-is: ", paste(other_cols, collapse = ", "))
-}
-
-train_model <- dplyr::bind_cols(class = train_df$class, train_x)
-test_model  <- dplyr::bind_cols(class = test_df$class, test_x)
+train_model <- dplyr::bind_cols(class = train_model$class, train_x)
+test_model  <- dplyr::bind_cols(class = test_model$class, test_x)
 
 # -----------------------------
 # Fit random forest
 # -----------------------------
-set.seed(404)
+set.seed(1223)
 
 rf_fit <- ranger::ranger(
   formula = class ~ .,
@@ -153,7 +136,7 @@ rf_fit <- ranger::ranger(
   probability = FALSE,
   importance = "impurity",
   num.trees = 500,
-  mtry = max(1, floor(sqrt(ncol(train_x)))),
+  mtry = max(1, floor(sqrt(length(model_predictors)))),
   min.node.size = 5,
   seed = 42
 )
@@ -162,48 +145,102 @@ rf_fit <- ranger::ranger(
 # Predict on test set
 # -----------------------------
 rf_pred <- predict(rf_fit, data = test_model)$predictions
-rf_pred <- factor(rf_pred, levels = levels(train_model$class))
+rf_pred <- factor(rf_pred, levels = all_class_levels)
 
 pred_tbl <- test_df %>%
-  dplyr::select(SegmentID, block_id, class) %>%
-  dplyr::mutate(pred_class = rf_pred)
+  dplyr::select(
+    dplyr::all_of(model_id_cols),
+    class,
+    dplyr::all_of(postprocess_cols)
+  ) %>%
+  dplyr::mutate(
+    class = factor(class, levels = all_class_levels),
+    pred_class = factor(rf_pred, levels = all_class_levels)
+  ) %>%
+  apply_infra_postprocess_rules(
+    pred_col = "pred_class",
+    out_col = "pred_class_final"
+  ) %>%
+  dplyr::mutate(
+    pred_class_final = factor(pred_class_final, levels = final_class_levels)
+  )
 
 # -----------------------------
 # Evaluate
 # -----------------------------
-cm <- table(truth = pred_tbl$class, pred = pred_tbl$pred_class)
+pred_tbl_eval <- pred_tbl %>%
+  dplyr::mutate(
+    class_eval = collapse_to_reference_class(class),
+    pred_class_eval = collapse_to_reference_class(pred_class_final),
+    
+    class_eval = factor(class_eval),
+    pred_class_eval = factor(pred_class_eval, levels = levels(class_eval))
+  )
 
-# as.data.frame.matrix(cm) %>% View()
-
-acc <- mean(as.character(pred_tbl$class) == as.character(pred_tbl$pred_class))
-
-# per-class recall
-recall_by_class <- diag(prop.table(cm, margin = 1))
-recall_tbl <- data.frame(
-  class = names(recall_by_class),
-  recall = as.numeric(recall_by_class)
+yardstick::accuracy_vec(
+  truth = pred_tbl_eval$class,
+  estimate = pred_tbl_eval$pred_class_eval
 )
 
-# macro F1 using yardstick
+yardstick::f_meas_vec(
+  truth = pred_tbl_eval$class,
+  estimate = pred_tbl_eval$pred_class_eval
+)
+
+cm <- table(
+  truth = pred_tbl$class,
+  pred = pred_tbl$pred_class_final
+)
+
+cm_eval <- table(
+  truth = pred_tbl_eval$class,
+  pred = pred_tbl_eval$pred_class_final
+)
+
+override_summary <- pred_tbl %>%
+  dplyr::count(
+    pred_class_model,
+    pred_class_final,
+    sort = TRUE
+  )
+
+print(override_summary)
+
+recall_tbl <- as.data.frame.matrix(prop.table(cm, margin = 1))
+recall_by_class <- data.frame(
+  class = rownames(cm),
+  recall = diag(prop.table(cm, margin = 1))
+)
+
 macro_f1 <- yardstick::f_meas_vec(
   truth = pred_tbl$class,
   estimate = pred_tbl$pred_class,
   estimator = "macro"
 )
 
-metrics_tbl <- data.frame(
-  metric = c("accuracy", "macro_f1"),
-  value = c(acc, macro_f1)
-)
-
-message("Accuracy: ", round(acc, 3))
-message("Macro F1: ", round(macro_f1, 3))
+# metrics_tbl <- data.frame(
+#   metric = c("accuracy", "macro_f1"),
+#   value = c(acc, macro_f1)
+# )
+# 
+# message("Accuracy: ", round(acc, 3))
+# message("Macro F1: ", round(macro_f1, 3))
 
 message("Confusion matrix:")
 print(cm)
 
 message("Recall by class:")
-print(recall_tbl)
+print(recall_by_class)
+
+message("Raw RF accuracy: ", round(mean(pred_tbl$class == pred_tbl$pred_class), 3))
+# message("Final accuracy: ", round(acc, 3))
+
+message("Post-processing changes:")
+print(table(
+  model = pred_tbl$pred_class,
+  final = pred_tbl$pred_class_final,
+  useNA = "ifany"
+))
 
 # -----------------------------
 # Variable importance
@@ -215,25 +252,36 @@ varimp_tbl <- data.frame(
   dplyr::arrange(dplyr::desc(importance))
 
 # -----------------------------
-# Write outputs
+# Save model bundle
 # -----------------------------
+model_bundle <- list(
+  model = rf_fit,
+  predictors = model_predictors,
+  class_levels = all_class_levels,
+  numeric_impute = num_impute,
+  factor_impute = fac_impute
+)
+
 saveRDS(
-  rf_fit,
+  model_bundle,
   here::here("outputs", "models", paste0("rf_baseline_", study_area_name, ".rds"))
 )
 
+# -----------------------------
+# Write outputs
+# -----------------------------
 readr::write_csv(
   pred_tbl,
   here::here("outputs", "tables", paste0("rf_predictions_", study_area_name, ".csv"))
 )
 
-readr::write_csv(
-  metrics_tbl,
-  here::here("outputs", "tables", paste0("rf_metrics_", study_area_name, ".csv"))
-)
+# readr::write_csv(
+#   metrics_tbl,
+#   here::here("outputs", "tables", paste0("rf_metrics_", study_area_name, ".csv"))
+# )
 
 readr::write_csv(
-  recall_tbl,
+  recall_by_class,
   here::here("outputs", "tables", paste0("rf_recall_by_class_", study_area_name, ".csv"))
 )
 

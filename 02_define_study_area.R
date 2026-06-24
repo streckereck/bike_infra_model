@@ -15,6 +15,11 @@ library(here)
 
 options(tigris_use_cache = TRUE)
 
+#public_buffer_m <- 3000  # ~2 miles
+public_buffer_m <- 550    # alternative tighter buffer
+county_buffer_m <- 250    # alternative tighter buffer
+
+
 # -----------------------------
 # Helper: read custom polygon
 # -----------------------------
@@ -27,6 +32,25 @@ read_custom_polygon <- function(name) {
   
   sf::st_read(path, quiet = TRUE) %>%
     sf::st_transform(utm_11)
+}
+
+# -----------------------------
+# Helper: write to Dropbox
+#------------------------------
+safe_st_write <- function(x, path) {
+  if (file.exists(path)) {
+    ok <- file.remove(path)
+    if (!ok) {
+      stop("Could not remove existing file: ", path,
+           "\nIt may be open in QGIS/ArcGIS/Excel or locked by Dropbox.")
+    }
+  }
+  
+  sf::st_write(
+    x,
+    path,
+    quiet = TRUE
+  )
 }
 
 # -----------------------------
@@ -49,7 +73,11 @@ city_mc <- tigris::places(state = "CA", cb = TRUE, year = 2022) %>%
 # -----------------------------
 if (study_area_name == "county") {
   
-  study_area <- county_sb
+  study_area <- county_sb %>%
+    sf::st_buffer(county_buffer_m) %>%
+    sf::st_union() %>%
+    sf::st_as_sf() %>%
+    sf::st_make_valid()
   
 } else if (study_area_name == "city_santa_barbara") {
   
@@ -60,11 +88,33 @@ if (study_area_name == "county") {
   # read custom rural extension polygon
   rural_ext <- read_custom_polygon("sb_rural_extension")
   
-  # combine city + rural extension
+  # read airport polygon - exlude
+  airport_excl <- read_custom_polygon("airport")
+  
+  # combine city + rural extension - airport
   study_area <- dplyr::bind_rows(city_sb, city_mc, rural_ext) %>%
     sf::st_union() %>%
+    sf::st_as_sf() %>%
+    sf::st_make_valid() %>%
+    sf::st_difference(sf::st_union(airport_excl)) %>%
+    sf::st_make_valid()
+  } else if (study_area_name == "city_santa_barbara_public") {
+  
+  rural_ext <- read_custom_polygon("sb_rural_extension")
+  airport_excl <- read_custom_polygon("airport")
+  
+  base_area <- dplyr::bind_rows(city_sb, city_mc, rural_ext) %>%
+    sf::st_union() %>%
+    sf::st_as_sf() %>%
+    sf::st_make_valid() %>%
+    sf::st_difference(sf::st_union(airport_excl)) %>%
     sf::st_make_valid()
   
+  study_area <- base_area %>%
+    sf::st_buffer(public_buffer_m) %>%
+    sf::st_union() %>%
+    sf::st_as_sf() %>%
+    sf::st_make_valid()
 } else {
   stop("Unknown study_area_name: ", study_area_name)
 }
@@ -79,18 +129,15 @@ message("CRS: ", sf::st_crs(study_area)$epsg)
 # -----------------------------
 # Write outputs
 # -----------------------------
-sf::st_write(
+
+safe_st_write(
   county_sb,
-  here::here("data_intermediate", "study_area_county.gpkg"),
-  delete_dsn = TRUE,
-  quiet = TRUE
+  here::here("data_intermediate", paste0("study_area_county.gpkg"))
 )
 
-sf::st_write(
+safe_st_write(
   study_area,
-  here::here("data_intermediate", paste0("study_area_", study_area_name, ".gpkg")),
-  delete_dsn = TRUE,
-  quiet = TRUE
+  here::here("data_intermediate", paste0("study_area_", study_area_name, ".gpkg"))
 )
 
 message("Done.")
