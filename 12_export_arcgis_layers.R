@@ -37,6 +37,7 @@ network_export <- network_pred %>%
       ) ~ "Medium comfort",
       
       class_export %in% c(
+        "Bike lane (painted buffer: high-speed street)",
         "Bike lane (no buffer)",
         "Signed low-speed/low-volume route",
         "Low-speed/low-volume street",
@@ -55,6 +56,7 @@ network_export <- network_pred %>%
         "Bike lane (painted buffer)",
         "Bike boulevard",
         "Signed low-speed/low-volume route",
+        "Bike lane (painted buffer: high-speed street)",
         "Bike lane (no buffer)",
         "Low-speed/low-volume street",
         "Trails (gravel)",
@@ -84,6 +86,10 @@ network_export <- network_pred %>%
     highway,
     surface_class,
     replica_traffic_context,
+    replica_vol_aadt,
+    replica_spd_average_speed_mph,
+    replica_missing,
+    high_speed_source,
     
     geom
   )
@@ -152,3 +158,15 @@ sf::st_write(
 )
 
 message("Export complete: ", export_path)
+
+# -----------------------------
+# Write Geodatabase
+# -----------------------------
+
+sf::st_write(
+  network_export,
+  dsn = here::here("outputs", "gis", "replica_county_18June2026.gdb"),
+  layer = "bike_network",
+  driver = "OpenFileGDB",
+  delete_dsn = TRUE
+)

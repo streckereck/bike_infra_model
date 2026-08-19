@@ -277,4 +277,272 @@ network_pred %>%
 
 review_map
 
+##############################
+# investigate buffers
+##############################
 
+network_pred %>%
+  sf::st_drop_geometry() %>%
+  dplyr::count(maxspeed, maxspeed_mph, sort = TRUE)
+
+buffered <- network_pred %>%
+  filter(pred_class_final == "Bike lane (painted buffer)")
+
+buffered %>%
+  st_drop_geometry() %>%
+  summarise(
+    n = n(),
+    has_maxspeed = sum(!is.na(maxspeed_mph)),
+    pct = mean(!is.na(maxspeed))
+  )
+
+network_pred %>%
+  st_drop_geometry() %>%
+  summarise(
+    n = n(),
+    has_maxspeed = sum(!is.na(maxspeed_mph)),
+    pct = mean(!is.na(maxspeed_mph))
+  )
+
+# replica
+buffered %>%
+  summarise(
+    n = n(),
+    missing = sum(is.na(replica_spd_average_speed_mph)),
+    pct = mean(!is.na(replica_spd_average_speed_mph)),
+    min = min(replica_spd_average_speed_mph, na.rm = TRUE),
+    median = median(replica_spd_average_speed_mph, na.rm = TRUE),
+    max = max(replica_spd_average_speed_mph, na.rm = TRUE)
+  )
+
+library(ggplot2)
+
+buffered %>%
+  ggplot(aes(replica_spd_average_speed_mph)) +
+  geom_histogram(binwidth = 2)
+
+
+buffered %>%
+  filter(!is.na(maxspeed_mph),
+         !is.na(replica_spd_average_speed_mph)) %>%
+  select(maxspeed_mph,
+         replica_spd_average_speed_mph)
+
+
+ggplot(buffered,
+       aes(maxspeed_mph,
+           replica_spd_average_speed_mph)) +
+  geom_point(alpha=.4)
+
+# how many would change?
+buffered %>%
+  mutate(
+    high_speed =
+      maxspeed_mph >= 35
+  ) %>%
+  count(high_speed)
+
+buffered %>%
+  mutate(
+    high_speed =
+      replica_spd_average_speed_mph >= 30
+  ) %>%
+  count(high_speed)
+
+buffered %>%
+  sf::st_drop_geometry() %>%
+  dplyr::mutate(
+    speed_limit_group = dplyr::case_when(
+      is.na(maxspeed_mph) ~ "Missing",
+      maxspeed_mph >= 35 ~ "35 mph or higher",
+      TRUE ~ "Below 35 mph"
+    )
+  ) %>%
+  dplyr::count(speed_limit_group)
+
+# where are the na's?
+buffered %>%
+  st_drop_geometry() %>%
+  mutate(
+    speed_group = case_when(
+      is.na(maxspeed_mph) ~ "Missing",
+      maxspeed_mph < 35 ~ "<35 mph",
+      maxspeed_mph >= 35 ~ ">=35 mph"
+    )
+  ) %>%
+  count(road_class, speed_group) %>%
+  tidyr::pivot_wider(
+    names_from = speed_group,
+    values_from = n,
+    values_fill = 0
+  )
+
+buffered %>%
+  st_drop_geometry() %>%
+  mutate(
+    speed_group = case_when(
+      is.na(maxspeed_mph) ~ "Missing",
+      maxspeed_mph < 35 ~ "<35 mph",
+      TRUE ~ ">=35 mph"
+    )
+  ) %>%
+  count(highway, speed_group) %>%
+  tidyr::pivot_wider(
+    names_from = speed_group,
+    values_from = n,
+    values_fill = 0
+  )
+
+# boxplot
+buffered %>%
+  st_drop_geometry() %>%
+  mutate(
+    speed_group = case_when(
+      is.na(maxspeed_mph) ~ "Missing",
+      maxspeed_mph < 35 ~ "<35 mph",
+      TRUE ~ ">=35 mph"
+    )
+  ) %>%
+  ggplot(aes(speed_group,
+             replica_spd_average_speed_mph)) +
+  geom_boxplot() +
+  labs(
+    x = "Posted speed category",
+    y = "Replica average speed (mph)"
+  )
+
+buffered %>%
+  st_drop_geometry() %>%
+  mutate(
+    speed_group = case_when(
+      is.na(maxspeed_mph) ~ "Missing",
+      maxspeed_mph < 35 ~ "<35 mph",
+      TRUE ~ ">=35 mph"
+    )
+  ) %>%
+  ggplot(aes(speed_group,
+             replica_spd_average_speed_mph,
+             fill = highway)) +
+  geom_boxplot()
+
+buffered %>%
+  st_drop_geometry() %>%
+  filter(highway == "secondary") %>%
+  mutate(
+    speed_group = case_when(
+      is.na(maxspeed_mph) ~ "Missing",
+      maxspeed_mph < 35 ~ "<35 mph",
+      TRUE ~ ">=35 mph"
+    )
+  ) %>%
+  ggplot(aes(speed_group,
+             replica_spd_average_speed_mph)) +
+  geom_boxplot()
+
+buffered %>%
+  filter(
+    replica_spd_average_speed_mph < 35 &
+      maxspeed_mph >= 35 &
+      highway %in% c("primary")
+  ) %>%
+  View()
+
+mapview::mapview(
+  buffered %>%
+    filter(is.na(maxspeed_mph))
+)
+
+# check buffers
+network_pred %>%
+  sf::st_drop_geometry() %>%
+  dplyr::count(
+    pred_class_model,
+    pred_class_final,
+    sort = TRUE
+  )
+
+network_pred %>%
+  sf::st_drop_geometry() %>%
+  dplyr::filter(
+    has_lane,
+    has_bike_buffer | has_bike_separation
+  ) %>%
+  dplyr::count(
+    high_speed_context,
+    pred_class_final
+  )
+
+network_pred %>%
+  dplyr::filter(
+    name %in% c(
+      "Cathedral Oaks Road",
+      "Las Positas Road",
+      "Hollister Avenue",
+      "State Street",
+      "Meigs Road",
+      "South Patterson Avenue"
+    )
+  ) %>%
+  dplyr::select(
+    name,
+    maxspeed_mph,
+    replica_spd_average_speed_mph,
+    replica_vol_aadt,
+    high_speed_context,
+    pred_class_final
+  )
+
+
+network_pred %>%
+  sf::st_drop_geometry() %>%
+  dplyr::filter(
+    pred_class_model == "Bike lane (painted buffer)",
+    pred_class_final == "Bike lane (no buffer)"
+  ) %>%
+  dplyr::mutate(
+    reason = dplyr::case_when(
+      dplyr::coalesce(has_lane, FALSE) &
+        (
+          dplyr::coalesce(has_bike_buffer, FALSE) |
+            dplyr::coalesce(has_bike_separation, FALSE)
+        ) &
+        dplyr::coalesce(high_speed_context, FALSE) ~
+        "Buffered lane + high speed",
+      
+      dplyr::coalesce(has_lane, FALSE) &
+        !(
+          dplyr::coalesce(has_bike_buffer, FALSE) |
+            dplyr::coalesce(has_bike_separation, FALSE)
+        ) ~
+        "OSM says unbuffered lane",
+      
+      TRUE ~ "Other"
+    )
+  ) %>%
+  dplyr::count(reason, sort = TRUE)
+
+
+buffered_corridor_speed <- network_pred %>%
+  sf::st_drop_geometry() %>%
+  dplyr::filter(
+    dplyr::coalesce(has_lane, FALSE),
+    dplyr::coalesce(has_bike_buffer, FALSE) |
+      dplyr::coalesce(has_bike_separation, FALSE)
+  ) %>%
+  dplyr::group_by(name, highway) %>%
+  dplyr::summarise(
+    corridor_replica_median =
+      median(replica_spd_average_speed_mph, na.rm = TRUE),
+    
+    corridor_replica_max =
+      max(replica_spd_average_speed_mph, na.rm = TRUE),
+    
+    pct_segments_over_35 =
+      mean(replica_spd_average_speed_mph > 35, na.rm = TRUE),
+    
+    n = dplyr::n(),
+    .groups = "drop"
+  )
+
+buffered_corridor_speed %>%
+  dplyr::arrange(desc(pct_segments_over_35))

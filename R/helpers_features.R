@@ -1,4 +1,5 @@
-make_osm_composite_features <- function(osm) {
+make_osm_composite_features <- function(osm,
+                                        high_speed_thresh = 35) {
   
   tag_present <- function(x) {
     x <- as.character(x)
@@ -33,7 +34,8 @@ make_osm_composite_features <- function(osm) {
   
   osm %>%
     dplyr::mutate(
- 
+      maxspeed = as.character(maxspeed),
+      maxspeed_mph = readr::parse_number(maxspeed),
       
       footway_tag = as.character(footway_tag),
       crossing_tag = as.character(crossing_tag),
@@ -177,7 +179,13 @@ make_osm_composite_features <- function(osm) {
       # Other useful flags
       # -----------------------------
       is_bridge = bridge %in% yes_vals,
-      is_oneway = oneway %in% yes_vals
+      is_oneway = oneway %in% yes_vals,
+      
+      high_speed_posted = dplyr::case_when(
+        is.na(maxspeed_mph) ~ NA,
+        maxspeed_mph > .env$high_speed_thresh ~ TRUE,
+        TRUE ~ FALSE
+      )
     )
 }
 
@@ -199,17 +207,23 @@ make_replica_composite_features <- function(
     dist_vol_col = "replica_vol_dist_m",
     dist_spd_col = "replica_spd_dist_m",
     max_valid_dist = 5,
-    aadt_thresh = 1500,
+    aadt_thresh = 2500,
     speed_thresh = 25
 ) {
   
   df %>%
     dplyr::mutate(
-      # treat joined values as valid only if close enough
-      replica_vol_valid = !is.na(.data[[aadt_col]]) & .data[[dist_vol_col]] <= max_valid_dist,
-      replica_spd_valid = !is.na(.data[[speed_col]]) & .data[[dist_spd_col]] <= max_valid_dist,
       
-      # keep only valid matched values
+      # Treat joined values as valid only if close enough
+      replica_vol_valid =
+        !is.na(.data[[aadt_col]]) &
+        .data[[dist_vol_col]] <= max_valid_dist,
+      
+      replica_spd_valid =
+        !is.na(.data[[speed_col]]) &
+        .data[[dist_spd_col]] <= max_valid_dist,
+      
+      # Keep only valid matched values
       aadt_valid = dplyr::if_else(
         replica_vol_valid,
         as.numeric(.data[[aadt_col]]),
@@ -226,37 +240,46 @@ make_replica_composite_features <- function(
       replica_speed_missing  = is.na(speed_valid),
       
       replica_missing = dplyr::case_when(
-        replica_volume_missing & replica_speed_missing ~ "Speed and volume missing",
-        replica_volume_missing ~ "Volume missing",
-        replica_speed_missing ~ "Speed missing",
-        TRUE ~ "Speed and volume available"
+        replica_volume_missing & replica_speed_missing ~
+          "Speed and volume missing",
+        
+        replica_volume_missing ~
+          "Volume missing",
+        
+        replica_speed_missing ~
+          "Speed missing",
+        
+        TRUE ~
+          "Speed and volume available"
       ),
       
-      # strict low-stress flag when both are available
-      replica_low_stress = dplyr::if_else(
-        !is.na(aadt_valid) &
-          !is.na(speed_valid) &
-          aadt_valid < aadt_thresh &
-          speed_valid < speed_thresh,
-        TRUE,
-        FALSE,
-        missing = FALSE
-      ),
+      # Strict low-stress flag when both are available
+      replica_low_stress =
+        !replica_volume_missing &
+        !replica_speed_missing &
+        aadt_valid <= aadt_thresh &
+        speed_valid <= speed_thresh,
       
-      # composite traffic context
+      # Composite traffic context
       replica_traffic_context = dplyr::case_when(
-        replica_speed_missing & replica_volume_missing ~ "no_replica",
+        
+        replica_speed_missing &
+          replica_volume_missing ~
+          "no_replica",
         
         !replica_volume_missing &
-          replica_vol_aadt <= 1500 &
-          replica_speed_missing ~ "low_volume_only",
+          replica_speed_missing &
+          aadt_valid <= aadt_thresh ~
+          "low_volume_only",
         
         !replica_volume_missing &
           !replica_speed_missing &
-          replica_vol_aadt <= 1500 &
-          replica_spd_average_speed_mph < 25 ~ "low_speed_low_volume",
+          aadt_valid <= aadt_thresh &
+          speed_valid <= speed_thresh ~
+          "low_speed_low_volume",
         
-        TRUE ~ "higher_speed_or_volume"
+        TRUE ~
+          "higher_speed_or_volume"
       ),
       
       is_low_speed_volume_candidate =
@@ -270,7 +293,6 @@ make_replica_composite_features <- function(
           "living_street",
           "unclassified"
         ),
-      
       replica_log_aadt = dplyr::if_else(
         !is.na(aadt_valid),
         log1p(aadt_valid),

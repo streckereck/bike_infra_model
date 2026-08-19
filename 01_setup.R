@@ -69,6 +69,7 @@ model_predictors <- c(
   "highway",
   "lanes",
   "maxspeed",
+  "maxspeed_mph",
   "surface_class",
   "is_unpaved",
   "has_any_cycleway",
@@ -124,6 +125,7 @@ postprocess_cols <- c(
   "replica_traffic_context",
   "has_bike_infra_signal",
   "is_low_speed_volume_candidate",
+  "high_speed_context",
   "has_route_signal",
   "traffic_calming_present"
   
@@ -151,6 +153,8 @@ logical_feature_cols <- c(
   "traffic_calming_present",
   "has_route_signal",
   "is_low_speed_volume_candidate",
+  "high_speed_posted",
+  "high_speed_context",
   "has_shared_lane"
 )
 
@@ -159,12 +163,13 @@ factor_feature_cols <- c(
   "highway",
   "surface_class",
   "replica_missing",
-  "replica_traffic_context"
+  "replica_traffic_context",
+  "high_speed_source"
 )
 
 numeric_feature_cols <- c(
   "lanes",
-  "maxspeed",
+  "maxspeed_mph",
   "replica_vol_aadt",
   "replica_spd_average_speed_mph",
   "replica_log_aadt"

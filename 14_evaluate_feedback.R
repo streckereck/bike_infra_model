@@ -144,6 +144,32 @@ network_pred_lines <- network_pred %>%
   sf::st_collection_extract("LINESTRING") %>%
   sf::st_cast("MULTILINESTRING", warn = FALSE)
 
+replica_review <- network_pred_lines %>%
+  mutate(length_m = st_length(geom) %>% as.numeric()) %>%
+  filter(
+    length_m < 30,
+    replica_vol_aadt > 5000,
+    highway %in% c("residential", "living_street")
+  )
+
+buffer_high_speed_qa <- network_pred %>%
+  dplyr::filter(
+    dplyr::coalesce(has_lane, FALSE),
+    (
+      dplyr::coalesce(has_bike_buffer, FALSE) |
+        dplyr::coalesce(has_bike_separation, FALSE)
+    ),
+    dplyr::coalesce(high_speed_context, FALSE)
+  ) %>%
+  dplyr::mutate(
+    length_m = as.numeric(sf::st_length(geom)),
+    osm_link = dplyr::if_else(
+      !is.na(osm_id),
+      paste0("https://www.openstreetmap.org/way/", osm_id),
+      NA_character_
+    )
+  )
+
 m_network <- mapview::mapview(
   network_pred_lines %>%
     mutate(
@@ -157,7 +183,15 @@ m_network <- mapview::mapview(
   color = comfort_pal,
   lwd = 3,
   layer.name = "Predicted network"
-)
+) +
+  mapview::mapview(
+    buffer_high_speed_qa,
+    color = "deeppink",
+    lwd = 8,
+    layer.name = "QA buffered lane high speed"
+  )
+
+
 
 m_feedback <- mapview::mapview(
   feedback_qa_popup,
@@ -167,6 +201,8 @@ m_feedback <- mapview::mapview(
   popup = feedback_qa_popup$popup_text,
   layer.name = "Feedback QA points"
 )
+
+
 
 # m_feedback_mismatch <- mapview::mapview(
 #   feedback_qa_popup %>% dplyr::filter(qa_result == "Mismatch"),
@@ -197,3 +233,158 @@ known_segments <- c(
 network_pred %>%
   filter(osm_id %in% known_segments) %>%
   select(osm_id, name, pred_class_final)
+
+# investigate buffers
+buffered <- network_pred %>%
+  filter(pred_class_final == "Bike lane (painted buffer)")
+
+buffered %>%
+  st_drop_geometry() %>%
+  count(high_speed_context, sort = TRUE)
+
+buffered %>%
+  st_drop_geometry() %>%
+  count(
+    highway,
+    high_speed_context
+  ) %>%
+  tidyr::pivot_wider(
+    names_from = high_speed_context,
+    values_from = n,
+    values_fill = 0,
+    names_prefix = "high_speed_"
+  )
+
+buffered %>%
+  st_drop_geometry() %>%
+  count(maxspeed_mph, sort = TRUE)
+
+buffered %>%
+  st_drop_geometry() %>%
+  count(
+    highway,
+    high_speed_context,
+    maxspeed_mph
+  ) %>%
+  tidyr::pivot_wider(
+    names_from = high_speed_context,
+    values_from = n,
+    values_fill = 0,
+    names_prefix = "high_speed_"
+  )
+
+# missing speed
+buffered %>%
+  st_drop_geometry() %>%
+  summarise(
+    n = n(),
+    known_speed = sum(!is.na(maxspeed_mph)),
+    high_speed = sum(high_speed_context %in% TRUE, na.rm = TRUE),
+    missing_speed = sum(is.na(maxspeed_mph)),
+    pct_speed_known = mean(!is.na(maxspeed_mph))
+  )
+
+# compare with replica
+buffered <- buffered %>%
+  mutate(
+    posted_speed_group = case_when(
+      high_speed_context %in% TRUE ~ ">35 mph",
+      high_speed_context %in% FALSE ~ "<=35 mph",
+      TRUE ~ "Missing"
+    ),
+    replica_vol_valid =
+      !is.na(replica_vol_aadt),
+    
+    replica_spd_valid =
+      !is.na(replica_spd_average_speed_mph),
+    
+    # Keep only valid matched values
+    aadt_valid = dplyr::if_else(
+      replica_vol_valid,
+      as.numeric(replica_vol_aadt),
+      NA_real_
+    ),
+    
+    speed_valid = dplyr::if_else(
+      replica_spd_valid,
+      as.numeric(replica_spd_average_speed_mph),
+      NA_real_
+    ),
+    
+    replica_volume_missing = is.na(aadt_valid),
+    replica_speed_missing  = is.na(speed_valid)) 
+
+buffered %>%
+  ggplot(
+    aes(
+      x = posted_speed_group,
+      y = speed_valid
+    )
+  ) +
+  geom_boxplot() +
+  labs(
+    x = "OSM posted speed",
+    y = "Replica average speed (mph)"
+  )
+
+buffered %>%
+  st_drop_geometry() %>%
+  mutate(
+    posted_speed_group = case_when(
+      maxspeed_mph > 35 ~ ">35",
+      !is.na(maxspeed_mph) ~ "<=35",
+      TRUE ~ "missing"
+    ),
+    replica_speed_group = case_when(
+      is.na(speed_valid) ~ "missing",
+      speed_valid <= 25 ~ "<=25",
+      speed_valid <= 35 ~ "25-35",
+      TRUE ~ ">35"
+    )
+  ) %>%
+  count(
+    highway,
+    posted_speed_group,
+    replica_speed_group
+  )
+
+buffered %>%
+  filter(highway == "secondary") %>%
+  st_drop_geometry() %>%
+  select(
+    name,
+    maxspeed_mph,
+    speed_valid,
+    aadt_valid,
+    replica_traffic_context
+  ) %>%
+  arrange(maxspeed_mph, desc(speed_valid))
+
+buffered %>%
+  st_drop_geometry() %>%
+  mutate(
+    posted_speed_group = case_when(
+      maxspeed_mph > 35 ~ ">35",
+      !is.na(maxspeed_mph) ~ "<=35",
+      TRUE ~ "missing"
+    )
+  ) %>%
+  count(
+    posted_speed_group,
+    replica_traffic_context
+  )
+
+buffered %>%
+  st_drop_geometry() %>%
+  mutate(
+    aadt_group = case_when(
+      is.na(aadt_valid) ~ "missing",
+      aadt_valid <= 2500 ~ "<=2,500",
+      aadt_valid <= 6000 ~ "2,501-6,000",
+      TRUE ~ ">6,000"
+    )
+  ) %>%
+  count(
+    posted_speed_group,
+    aadt_group
+  )

@@ -40,6 +40,15 @@ apply_infra_postprocess_rules <- function(df,
         dplyr::coalesce(has_track, FALSE) ~
           "Bike lane (physical protection)",
         
+        # Buffered bike lane in high-speed context -> low comfort
+        dplyr::coalesce(has_lane, FALSE) &
+          (
+            dplyr::coalesce(has_bike_buffer, FALSE) |
+              dplyr::coalesce(has_bike_separation, FALSE)
+          ) &
+          dplyr::coalesce(high_speed_context, FALSE) ~
+          "Bike lane (painted buffer: high-speed street)",
+        
         # Medium comfort
         dplyr::coalesce(has_lane, FALSE) &
           (
