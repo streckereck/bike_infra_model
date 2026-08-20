@@ -89,7 +89,7 @@ network_export <- network_pred %>%
     replica_vol_aadt,
     replica_spd_average_speed_mph,
     replica_missing,
-    high_speed_source,
+    #high_speed_source,
     
     geom
   )
@@ -137,7 +137,7 @@ reference_export <- reference_context %>%
 # -----------------------------
 export_path <- here::here(
   "outputs", "gis",
-  paste0("arcgis_export_", study_area_name, "_18June2026", ".gpkg")
+  paste0("arcgis_export_", study_area_name, "_19Aug2026", ".gpkg")
 )
 
 if (file.exists(export_path)) file.remove(export_path)
@@ -170,3 +170,20 @@ sf::st_write(
   driver = "OpenFileGDB",
   delete_dsn = TRUE
 )
+
+# ref points for yuyan
+reference_context_yuyan <- reference_context %>%
+  st_transform(4326) %>%
+  mutate(
+    lon = st_coordinates(.)[, 1],
+    lat = st_coordinates(.)[, 2]
+  )
+
+st_write(
+  reference_context_yuyan,
+  dsn = here::here("outputs", "gis", "reference_points.shp"),
+
+)
+
+write_csv(reference_context_yuyan,
+          "outputs/gis/reference_points.csv")

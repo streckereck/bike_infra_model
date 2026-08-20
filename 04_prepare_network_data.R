@@ -97,7 +97,8 @@ if (refresh_osm_layer || download_osm){
       
       "lit", "maxspeed", "motor:vehicle", "oneway", "oneway:bicycle",
       "path", "railway", "segregated", "sidewalk", "sidewalk:both:surface",
-      "surface", "traffic_calming", "width", "access", "natural"
+      "surface", "traffic_calming", "width", "access", "natural",
+      "shoulder", "shoulder:left", "shoulder:right", "shoulder:both"
     ),
     quiet = TRUE
   )
